@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rustyshort-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:rustyshort}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:rustyshort}
+      POSTGRES_DB: ${POSTGRES_DB:rustyshort}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rustyshort"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rustyshort-network
+
+  app:
+    build: .
+    container_name: rustyshort-app
+    environment:
+      DATABASE_URL: ${DATABASE_URL:postgres://rustyshort:rustyshort@postgres:5432/rustyshort}
+      SERVER_HOST: ${SERVER_HOST:0.0.0.0}
+      SERVER_PORT: ${SERVER_PORT:8080}
+      BASE_URL: ${BASE_URL:http://localhost:8080}
+      RUST_LOG: ${RUST_LOG:rustyshort=info,tower_http=info}
+      CACHE_TTL: 3600
+      CACHE_MAX_CAPACITY: 10000
+      RATE_LIMIT_PER_SECOND: 10
+      RATE_LIMIT_BURST_SIZE: 50
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - rustyshort-network
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: rustyshort-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - rustyshort-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+
+networks:
+  rustyshort-network:
+    driver: bridge
+
